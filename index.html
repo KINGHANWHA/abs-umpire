@@ -20,7 +20,7 @@
 <meta name="twitter:image" content="og-image.png" />
 
 <!-- 업데이트할 때마다 ?v= 숫자를 올리면 브라우저가 새 파일을 받음(캐시 무력화) -->
-<link rel="stylesheet" href="style.css?v=1" />
+<link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
 <div id="app">
@@ -62,6 +62,12 @@
     <div id="batter-info">
       <span id="batter-name">—</span>
       <span id="batter-height" class="sub">키 --cm</span>
+    </div>
+
+    <!-- 볼-스트라이크 카운트 전광판 -->
+    <div id="count">
+      <div class="cnt-row"><span class="cnt-label b">B</span><span class="dots" id="ball-dots"></span></div>
+      <div class="cnt-row"><span class="cnt-label s">S</span><span class="dots" id="strike-dots"></span></div>
     </div>
 
     <!-- 판정 제한시간 바 -->
@@ -145,6 +151,6 @@
   </div>
 </div>
 
-<script src="game.js?v=1"></script>
+<script src="game.js?v=2"></script>
 </body>
 </html>

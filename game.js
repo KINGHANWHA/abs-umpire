@@ -69,13 +69,19 @@ const PITCHES = [
 
 /* ---------- 게임 상태 ---------- */
 const CRED_MAX = 5;
-let state = 'idle';     // idle | pitching | decide | result
+let state = 'idle';     // idle | ready | pitching | decide | result
 let score=0, combo=0, maxCombo=0, calls=0, correct=0, cred=CRED_MAX;
 let pitch=null;         // 현재 투구 객체
 let tStart=0;           // 애니메이션 타임스탬프
 let decideStart=0, decideDur=0;
 let readyStart=0, readyDur=0;
 let resultStart=0, resultInfo=null;
+
+/* ---------- 타석/카운트 ---------- */
+let balls=0, strikes=0;          // 현재 타석의 볼-스트라이크 카운트
+let curBatter=null, curZone=null;// 한 타석 동안 유지되는 타자/존
+let newAtBatNext=true;           // 다음 투구에서 새 타석 시작 여부
+let strikeouts=0, walks=0;       // 통계
 
 /* ---------- DOM ---------- */
 const el = id => document.getElementById(id);
@@ -96,6 +102,38 @@ function beep(freq, dur=0.08, type='square', vol=0.06){
     g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+dur);
     o.start(); o.stop(actx.currentTime+dur);
   }catch(e){}
+}
+
+/* ---------- TTS 콜 음성 ---------- */
+let koVoice=null, ttsOK=('speechSynthesis' in window);
+function loadVoices(){
+  if(!ttsOK) return;
+  const vs = speechSynthesis.getVoices();
+  koVoice = vs.find(v=>v.lang==='ko-KR') || vs.find(v=>v.lang&&v.lang.toLowerCase().startsWith('ko')) || null;
+}
+if(ttsOK){ loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+// 한국어 음성이 있으면 한국어로, 없으면 영어 텍스트로 대체 발화
+function speak(koText, enText){
+  if(!ttsOK) return;
+  try{
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(koVoice ? koText : enText);
+    if(koVoice){ u.voice=koVoice; u.lang='ko-KR'; } else { u.lang='en-US'; }
+    u.rate=0.98; u.pitch=0.8; u.volume=1;   // 살짝 낮고 단호하게(심판 톤)
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+/* 콜 종류별 효과음 + 음성 */
+function playCall(kind){   // 'strike' | 'ball' | 'out' | 'walk'
+  if(kind==='strike'){ beep(1050,0.05,'square',0.07); speak('스트라이크','Strike'); }
+  else if(kind==='ball'){ beep(420,0.09,'sine',0.06); speak('볼','Ball'); }
+  else if(kind==='out'){   // 삼진아웃: 펀치아웃 느낌 더블 히트
+    beep(1100,0.05,'square',0.08); setTimeout(()=>beep(1400,0.07,'square',0.08),90);
+    speak('삼진 아웃','Strike three, you are out');
+  }
+  else if(kind==='walk'){ beep(500,0.08,'sine',0.06); setTimeout(()=>beep(380,0.1,'sine',0.06),100);
+    speak('볼넷','Ball four'); }
 }
 
 /* ---------- 난이도 ---------- */
@@ -125,9 +163,18 @@ function edgeDistance(cx, cy, zone){
 function rand(a,b){ return a + Math.random()*(b-a); }
 function pick(arr){ return arr[(Math.random()*arr.length)|0]; }
 
+// 새 타석 시작: 타자/존 선택, 카운트 리셋
+function newAtBat(){
+  curBatter = pick(BATTERS);
+  curZone = zoneForBatter(curBatter);
+  balls=0; strikes=0;
+  updateCount();
+}
+
 function newPitch(){
-  const b = pick(BATTERS);
-  const zone = zoneForBatter(b);
+  if(!curBatter) newAtBat();
+  const b = curBatter;
+  const zone = curZone;
   const ptype = pick(PITCHES);
   const d = difficulty();
   const speed = Math.round(rand(ptype.vmin, ptype.vmax) + d*4);
@@ -180,8 +227,21 @@ function newPitch(){
             breakX:bx, breakY:by };
 }
 
+/* 콜에 따라 카운트 진행 → 콜 종류 반환 */
+function applyCount(){
+  let kind;
+  if(pitch.truth){ strikes++; kind = (strikes>=3)?'out':'strike'; }
+  else { balls++; kind = (balls>=4)?'walk':'ball'; }
+  updateCount();
+  if(kind==='out'){ strikeouts++; newAtBatNext=true; }
+  else if(kind==='walk'){ walks++; newAtBatNext=true; }
+  else { newAtBatNext=false; }
+  return kind;
+}
+
 /* ---------- 투구 시작 ---------- */
 function startPitch(){
+  if(newAtBatNext){ newAtBat(); newAtBatNext=false; }
   newPitch();
   // 투구 전: 존을 보여주며 기억하게 하는 준비 단계 (난이도↑ 일수록 짧아짐)
   state='ready';
@@ -204,18 +264,19 @@ function makeCall(callStrike){
   resultStart = performance.now();
   calls++;
   const ok = (callStrike === pitch.truth);
+  const callKind = applyCount();            // 카운트 진행 + 콜 종류(strike/ball/out/walk)
   if(ok){
     correct++; combo++; maxCombo=Math.max(maxCombo,combo);
     const base = (pitch.kind==='border') ? 150 : 100;
     const gain = base + combo*10;
     score += gain;
-    beep(880,0.07,'square'); setTimeout(()=>beep(1320,0.09,'square'),70);
-    resultInfo = { ok:true, gain };
+    resultInfo = { ok:true, gain, callKind };
   } else {
     combo=0; cred--;
-    beep(180,0.18,'sawtooth',0.09);
-    resultInfo = { ok:false, gain:0 };
+    beep(180,0.18,'sawtooth',0.09);         // 오심 버저
+    resultInfo = { ok:false, gain:0, callKind };
   }
+  playCall(callKind);                        // ABS 콜 음성 + 효과음(실제 판정 기준)
   (callStrike?$btnStrike:$btnBall).classList.add('flash');
   setTimeout(()=>{$btnStrike.classList.remove('flash');$btnBall.classList.remove('flash');},300);
   setButtons(false);
@@ -227,8 +288,10 @@ function makeCall(callStrike){
 function timeoutCall(){
   if(state!=='decide') return;
   state='result'; resultStart=performance.now(); calls++; combo=0; cred--;
+  const callKind = applyCount();
   beep(140,0.25,'sawtooth',0.09);
-  resultInfo={ ok:false, gain:0, timeout:true };
+  playCall(callKind);
+  resultInfo={ ok:false, gain:0, timeout:true, callKind };
   setButtons(false); $timerWrap.classList.remove('show');
   showResultUI(null, false);
   updateHUD();
@@ -236,14 +299,28 @@ function timeoutCall(){
 
 /* ---------- 결과 UI ---------- */
 function showResultUI(callStrike, ok){
-  $banner.textContent = pitch.truth ? '스트라이크!' : '볼!';
-  $banner.className = (pitch.truth?'strike':'ball') + ' show';
+  const k = resultInfo.callKind;
+  const word = k==='out'?'삼진 아웃!' : k==='walk'?'볼넷!' : k==='strike'?'스트라이크!' : '볼!';
+  $banner.textContent = word;
+  const big = (k==='out'||k==='walk') ? ' big' : '';
+  $banner.className = (pitch.truth?'strike':'ball') + big + ' show';
   let line, sub;
   if(resultInfo.timeout){ line='판정 지연!'; sub='시간 초과 — 콜을 놓쳤습니다'; }
   else if(ok){ line='정확한 판정 ✓'; sub='+' + resultInfo.gain + '점' + (pitch.kind==='border'?' · 보더라인 보너스':''); }
   else { line='오심! ✗'; sub='당신의 콜: ' + (callStrike?'스트라이크':'볼') + ' · 신뢰도 -1'; }
+  if(k==='out') sub += ' · 삼진아웃!';
+  else if(k==='walk') sub += ' · 볼넷';
   $verdict.innerHTML = line + '<span class="sub">'+sub+'</span>';
   $verdict.className = (ok?'good':'bad');
+}
+
+/* ---------- 카운트 전광판 ---------- */
+function updateCount(){
+  const bd=el('ball-dots'), sd=el('strike-dots');
+  if(!bd||!sd) return;
+  let bh=''; for(let i=0;i<3;i++) bh+='<i class="dot'+(i<balls?' b-on':'')+'"></i>';
+  let sh=''; for(let i=0;i<2;i++) sh+='<i class="dot'+(i<strikes?' s-on':'')+'"></i>';
+  bd.innerHTML=bh; sd.innerHTML=sh;
 }
 
 /* ---------- HUD ---------- */
@@ -468,7 +545,8 @@ function render(now){
     }
     else if(state==='result'){
       drawResultFrame();
-      if(now - resultStart > 1500){
+      const dur = (resultInfo && (resultInfo.callKind==='out'||resultInfo.callKind==='walk')) ? 2200 : 1500;
+      if(now - resultStart > dur){
         if(cred<=0) gameOver();
         else startPitch();
       }
@@ -524,10 +602,13 @@ function drawResultFrame(){
 /* ---------- 게임 흐름 ---------- */
 function startGame(){
   score=0;combo=0;maxCombo=0;calls=0;correct=0;cred=CRED_MAX;
-  updateHUD();
+  balls=0;strikes=0;strikeouts=0;walks=0;curBatter=null;curZone=null;newAtBatNext=true;
+  updateHUD(); updateCount();
   el('start-screen').classList.add('hidden');
   el('over-screen').classList.add('hidden');
   if(actx && actx.state==='suspended') actx.resume();
+  // TTS는 사용자 제스처 후 활성화 — 무음 발화로 워밍업
+  if(ttsOK){ try{ speechSynthesis.cancel(); speechSynthesis.resume(); }catch(e){} }
   startPitch();
 }
 
@@ -594,7 +675,7 @@ kick();
    운영(배포) 환경에는 노출하지 않음. localhost 이거나 URL에 ?debug 가 있을 때만 활성화 */
 if (location.hostname==='localhost' || location.hostname==='127.0.0.1' || location.search.includes('debug'))
 window.ABSDEBUG = {
-  state:()=>({state,score,combo,maxCombo,calls,correct,cred}),
+  state:()=>({state,score,combo,maxCombo,calls,correct,cred,balls,strikes,strikeouts,walks,newAtBatNext}),
   pitch:()=>pitch&&{kind:pitch.kind,truth:pitch.truth,speed:pitch.speed,type:pitch.ptype.name,
                     batter:pitch.b.name,cx:Math.round(pitch.cx),cy:Math.round(pitch.cy),
                     top:Math.round(pitch.zone.top),bot:Math.round(pitch.zone.bot)},
