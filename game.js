@@ -91,18 +91,54 @@ const $banner=el('call-banner'), $verdict=el('verdict');
 const $btnBall=el('btn-ball'), $btnStrike=el('btn-strike');
 const $timerWrap=el('timer-wrap'), $timerBar=el('timer-bar');
 
-/* ---------- 오디오 (간단 비프) ---------- */
-let actx=null;
+/* ---------- 오디오 엔진 ---------- */
+let actx=null, noiseBuf=null;
+function ac(){
+  actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+  if(actx.state==='suspended'){ try{ actx.resume(); }catch(e){} }
+  return actx;
+}
 function beep(freq, dur=0.08, type='square', vol=0.06){
   try{
-    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
-    const o=actx.createOscillator(), g=actx.createGain();
-    o.type=type; o.frequency.value=freq; o.connect(g); g.connect(actx.destination);
-    g.gain.setValueAtTime(vol, actx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+dur);
-    o.start(); o.stop(actx.currentTime+dur);
+    const a=ac();
+    const o=a.createOscillator(), g=a.createGain();
+    o.type=type; o.frequency.value=freq; o.connect(g); g.connect(a.destination);
+    g.gain.setValueAtTime(vol, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime+dur);
+    o.start(); o.stop(a.currentTime+dur);
   }catch(e){}
 }
+// 주파수 슬라이드 톤 (스윕/스탭용)
+function tone(t0, f0, f1, dur, type, vol){
+  const a=ac();
+  const o=a.createOscillator(), g=a.createGain();
+  o.type=type;
+  o.frequency.setValueAtTime(f0, t0);
+  o.frequency.exponentialRampToValueAtTime(Math.max(1,f1), t0+dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0+0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+  o.connect(g); g.connect(a.destination);
+  o.start(t0); o.stop(t0+dur+0.03);
+}
+// 밴드패스 화이트노이즈 버스트 (타격/펀치음)
+function noiseHit(t0, dur, freq, q, vol){
+  const a=ac();
+  if(!noiseBuf){
+    const n=Math.floor(a.sampleRate*0.6);
+    noiseBuf=a.createBuffer(1,n,a.sampleRate);
+    const d=noiseBuf.getChannelData(0);
+    for(let i=0;i<n;i++) d[i]=Math.random()*2-1;
+  }
+  const s=a.createBufferSource(); s.buffer=noiseBuf;
+  const bp=a.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=freq; bp.Q.value=q;
+  const g=a.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+  s.connect(bp); bp.connect(g); g.connect(a.destination);
+  s.start(t0); s.stop(t0+dur+0.02);
+}
+function chordStab(t0, freqs, dur, type, vol){ freqs.forEach(f=>tone(t0,f,f*0.992,dur,type,vol)); }
 
 /* ---------- TTS 콜 음성 ---------- */
 let koVoice=null, ttsOK=('speechSynthesis' in window);
@@ -112,28 +148,65 @@ function loadVoices(){
   koVoice = vs.find(v=>v.lang==='ko-KR') || vs.find(v=>v.lang&&v.lang.toLowerCase().startsWith('ko')) || null;
 }
 if(ttsOK){ loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
-// 한국어 음성이 있으면 한국어로, 없으면 영어 텍스트로 대체 발화
-function speak(koText, enText){
+function mkUtter(text, rate, pitch){
+  const u = new SpeechSynthesisUtterance(text);
+  if(koVoice){ u.voice=koVoice; u.lang='ko-KR'; } else { u.lang='en-US'; }
+  u.rate=rate; u.pitch=pitch; u.volume=1;
+  return u;
+}
+function say(koText, enText, rate, pitch){
   if(!ttsOK) return;
-  try{
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(koVoice ? koText : enText);
-    if(koVoice){ u.voice=koVoice; u.lang='ko-KR'; } else { u.lang='en-US'; }
-    u.rate=0.98; u.pitch=0.8; u.volume=1;   // 살짝 낮고 단호하게(심판 톤)
-    speechSynthesis.speak(u);
-  }catch(e){}
+  try{ speechSynthesis.cancel(); speechSynthesis.speak(mkUtter(koVoice?koText:enText, rate, pitch)); }catch(e){}
 }
 
-/* 콜 종류별 효과음 + 음성 */
+/* 콜 종류별 — 효과음 + 흥분된 음성 */
 function playCall(kind){   // 'strike' | 'ball' | 'out' | 'walk'
-  if(kind==='strike'){ beep(1050,0.05,'square',0.07); speak('스트라이크','Strike'); }
-  else if(kind==='ball'){ beep(420,0.09,'sine',0.06); speak('볼','Ball'); }
-  else if(kind==='out'){   // 삼진아웃: 펀치아웃 느낌 더블 히트
-    beep(1100,0.05,'square',0.08); setTimeout(()=>beep(1400,0.07,'square',0.08),90);
-    speak('삼진 아웃','Strike three, you are out');
+  try{ _playCall(kind); }catch(e){}
+}
+function _playCall(kind){
+  const a=ac(), t=a.currentTime;
+  if(kind==='strike'){
+    // 날카로운 '딱' + 밝은 상승 스탭 → 흥분된 외침
+    noiseHit(t, 0.05, 2400, 7, 0.45);
+    tone(t+0.01, 700, 1500, 0.13, 'square', 0.13);
+    chordStab(t+0.02, [880,1320], 0.12, 'square', 0.07);
+    say('스트라이크!', 'Strike!', 1.08, 1.25);
   }
-  else if(kind==='walk'){ beep(500,0.08,'sine',0.06); setTimeout(()=>beep(380,0.1,'sine',0.06),100);
-    speak('볼넷','Ball four'); }
+  else if(kind==='ball'){
+    // 차분한 저음 — 볼은 담담하게
+    tone(t, 320, 190, 0.16, 'sine', 0.16);
+    say('볼', 'Ball', 0.98, 0.95);
+  }
+  else if(kind==='out'){
+    playStrikeout();
+  }
+  else if(kind==='walk'){
+    tone(t, 520, 360, 0.16, 'sine', 0.14);
+    tone(t+0.12, 360, 300, 0.18, 'sine', 0.12);
+    say('볼넷', 'Ball four', 1.0, 1.0);
+  }
+}
+
+/* 삼진아웃: 긴장 빌드업 → 폭발 펀치 → 승리의 brass → "삼진…아웃!" 2단 폭발 */
+function playStrikeout(){
+  const a=ac(), t=a.currentTime;
+  // 1) 빌드업 상승 스윕(긴장)
+  tone(t, 220, 1300, 0.34, 'sawtooth', 0.10);
+  noiseHit(t+0.05, 0.30, 900, 1.2, 0.08);
+  // 2) 폭발 펀치 (t+0.34)
+  const h = t+0.34;
+  tone(h, 180, 55, 0.45, 'sine', 0.55);          // 저음 붐
+  noiseHit(h, 0.20, 1700, 1.6, 0.55);            // 펀치 노이즈
+  noiseHit(h, 0.05, 5000, 3, 0.30);              // 고역 '쨍'
+  // 3) 승리의 brass 스탭 (장조 코드)
+  chordStab(h+0.02, [392,523,659], 0.5, 'sawtooth', 0.12);   // G-B-D
+  chordStab(h+0.18, [523,659,784], 0.45, 'sawtooth', 0.10);  // 한 계단 상승
+  // 4) 음성 2단 폭발: "삼진" → (사이) → "아웃!"
+  if(ttsOK){
+    try{ speechSynthesis.cancel(); }catch(e){}
+    setTimeout(()=>{ try{ speechSynthesis.speak(mkUtter(koVoice?'삼진':'Strike three', 0.95, 0.95)); }catch(e){} }, 360);
+    setTimeout(()=>{ try{ speechSynthesis.speak(mkUtter(koVoice?'아웃!':"You're out!", 1.0, 1.3)); }catch(e){} }, 980);
+  }
 }
 
 /* ---------- 난이도 ---------- */
