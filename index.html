@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<!-- 보안: 외부 리소스 차단(자기 출처만 허용), 레퍼러 비전송 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
+<meta name="referrer" content="no-referrer" />
+<title>나는야 ABS 심판</title>
+<meta name="description" content="포수 뒤 심판 시점에서 스트라이크와 볼을 판정하는 야구 ABS 미니게임. 당신이 곧 ABS!" />
+
+<!-- 링크 공유 미리보기 (Open Graph / Twitter Card) -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="나는야 ABS 심판" />
+<meta property="og:description" content="포수 뒤 심판 시점에서 스트라이크와 볼을 판정하라. 당신이 곧 ABS!" />
+<meta property="og:image" content="og-image.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="나는야 ABS 심판" />
+<meta name="twitter:description" content="포수 뒤 심판 시점에서 스트라이크와 볼을 판정하라. 당신이 곧 ABS!" />
+<meta name="twitter:image" content="og-image.png" />
+
+<!-- 업데이트할 때마다 ?v= 숫자를 올리면 브라우저가 새 파일을 받음(캐시 무력화) -->
+<link rel="stylesheet" href="style.css?v=1" />
+</head>
+<body>
+<div id="app">
+  <!-- 경기 화면 -->
+  <div id="stage">
+    <canvas id="field"></canvas>
+
+    <!-- 상단 HUD -->
+    <header id="hud">
+      <div class="hud-cell">
+        <span class="hud-label">점수</span>
+        <span id="score" class="hud-value">0</span>
+      </div>
+      <div class="hud-cell">
+        <span class="hud-label">콤보</span>
+        <span id="combo" class="hud-value">0</span>
+      </div>
+      <div class="hud-cell">
+        <span class="hud-label">정확도</span>
+        <span id="accuracy" class="hud-value">—</span>
+      </div>
+      <div class="hud-cell">
+        <span class="hud-label">판정 수</span>
+        <span id="calls" class="hud-value">0</span>
+      </div>
+      <div class="hud-cell cred-cell">
+        <span class="hud-label">판정 신뢰도</span>
+        <div id="credibility" class="cred-bar"></div>
+      </div>
+    </header>
+
+    <!-- 투구 정보 -->
+    <div id="pitch-info">
+      <span id="pitch-type">—</span>
+      <span id="pitch-speed">--</span><span class="kmh">km/h</span>
+    </div>
+
+    <!-- 타자 정보 -->
+    <div id="batter-info">
+      <span id="batter-name">—</span>
+      <span id="batter-height" class="sub">키 --cm</span>
+    </div>
+
+    <!-- 판정 제한시간 바 -->
+    <div id="timer-wrap"><div id="timer-bar"></div></div>
+
+    <!-- 결과 콜 텍스트 -->
+    <div id="call-banner" class="hidden"></div>
+    <div id="verdict" class="hidden"></div>
+
+    <!-- 하단 판정 버튼 -->
+    <div id="controls">
+      <button id="btn-ball" class="call-btn ball" disabled>
+        <span class="big">볼</span>
+        <span class="en">BALL</span>
+        <span class="key">F / ←</span>
+      </button>
+      <button id="btn-strike" class="call-btn strike" disabled>
+        <span class="big">스트라이크</span>
+        <span class="en">STRIKE</span>
+        <span class="key">J / →</span>
+      </button>
+    </div>
+
+    <button id="rules-toggle" title="ABS 규칙">규칙 ⓘ</button>
+  </div>
+
+  <!-- 시작 화면 -->
+  <div id="start-screen" class="overlay">
+    <div class="panel">
+      <h1>당신이 곧 <span class="accent">ABS</span></h1>
+      <p class="tagline">포수 뒤 심판 시점에서 스트라이크와 볼을 판정하라</p>
+      <ul class="howto">
+        <li>마운드에서 날아온 공이 플레이트에 도달하면, 제한시간 안에 <b>스트라이크 / 볼</b>을 판정합니다.</li>
+        <li><b>공의 일부라도</b> 존에 닿으면 스트라이크 (KBO ABS 규칙).</li>
+        <li>스트라이크 존 높이는 <b>타자 신장</b>에 따라 달라집니다 (상단 56.35%, 하단 27.64%).</li>
+        <li>정확하면 점수·콤보 획득, 오심하면 <b>판정 신뢰도</b>가 깎입니다. 0이 되면 해임!</li>
+      </ul>
+      <div class="best-line">최고 점수 <b id="best-score">0</b> · 최고 정확도 <b id="best-acc">—</b></div>
+      <button id="btn-start" class="primary">경기 시작</button>
+      <p class="hint-keys">키보드: <b>F</b> 또는 <b>←</b> = 볼, <b>J</b> 또는 <b>→</b> = 스트라이크</p>
+    </div>
+  </div>
+
+  <!-- 게임오버 -->
+  <div id="over-screen" class="overlay hidden">
+    <div class="panel">
+      <h1 class="over-title">판정 종료</h1>
+      <div class="final-grid">
+        <div><span class="fl">최종 점수</span><span id="final-score" class="fv">0</span></div>
+        <div><span class="fl">정확도</span><span id="final-acc" class="fv">—</span></div>
+        <div><span class="fl">총 판정</span><span id="final-calls" class="fv">0</span></div>
+        <div><span class="fl">최고 콤보</span><span id="final-combo" class="fv">0</span></div>
+      </div>
+      <div id="grade" class="grade">—</div>
+      <button id="btn-restart" class="primary">다시 판정</button>
+    </div>
+  </div>
+
+  <!-- 규칙 패널 -->
+  <div id="rules-screen" class="overlay hidden">
+    <div class="panel rules">
+      <h2>KBO ABS 판정 규칙</h2>
+      <div class="rule-block">
+        <h3>좌우 (홈플레이트)</h3>
+        <p>홈플레이트 너비(43.18cm)를 기준으로, <b>공의 일부라도</b> 존을 통과하면 스트라이크입니다.</p>
+      </div>
+      <div class="rule-block">
+        <h3>상하 (타자 신장 비율)</h3>
+        <p>상단 = 신장의 <b>56.35%</b>, 하단 = 신장의 <b>27.64%</b>.<br/>타자마다 키가 다르므로 존의 높이가 달라집니다. 큰 타자일수록 존이 높고 큽니다.</p>
+      </div>
+      <div class="rule-block">
+        <h3>입체 판정 (앞면 + 중간면)</h3>
+        <p>ABS는 홈플레이트 <b>앞쪽과 중간</b> 두 평면 통과 여부로 판정합니다. 그래서 존은 평면이 아닌 <b>부피</b>로 다룹니다 — 화면의 존 박스가 입체로 보이는 이유입니다.</p>
+      </div>
+      <div class="rule-block">
+        <h3>팁</h3>
+        <p>변화구는 마지막에 휘어집니다. 끝까지 공을 보고, 공의 <b>가장자리</b>가 존 라인에 닿는지 보세요.</p>
+      </div>
+      <button id="btn-close-rules" class="primary">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script src="game.js?v=1"></script>
+</body>
+</html>
