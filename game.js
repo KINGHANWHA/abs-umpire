@@ -140,23 +140,37 @@ function noiseHit(t0, dur, freq, q, vol){
 }
 function chordStab(t0, freqs, dur, type, vol){ freqs.forEach(f=>tone(t0,f,f*0.992,dur,type,vol)); }
 
-/* ---------- TTS 콜 음성 ---------- */
-let koVoice=null, ttsOK=('speechSynthesis' in window);
-function loadVoices(){
-  if(!ttsOK) return;
-  const vs = speechSynthesis.getVoices();
-  koVoice = vs.find(v=>v.lang==='ko-KR') || vs.find(v=>v.lang&&v.lang.toLowerCase().startsWith('ko')) || null;
+/* ---------- TTS 콜 음성 (남성으로 통일) ----------
+   기기마다 기본 음성 성별이 달라(데스크톱 남성/모바일 여성) 남성 음성을 우선 선택.
+   우선순위: ① 한국어 남성  ② 영어 남성  ③ 한국어(성별불명) → 피치 다운으로 남성화 */
+let VOICE=null, ttsOK=('speechSynthesis' in window);
+const MALE_KO=['injoon','minjun','minsu','jihun','hyunwoo','sanghoon','seoyeon-male','남성','남자','male','man'];
+const MALE_EN=['david','mark','guy','christopher','eric','daniel','arthur','aaron','fred','alex','rishi','tom','oliver','google uk english male','male'];
+function selectVoice(){
+  const vs=speechSynthesis.getVoices(); if(!vs.length) return null;
+  const ko=vs.filter(v=>/^ko/i.test(v.lang));
+  const en=vs.filter(v=>/^en/i.test(v.lang));
+  const byHint=(list,hints)=>list.find(v=>{const n=v.name.toLowerCase(); return hints.some(h=>n.includes(h));});
+  let v=byHint(ko,MALE_KO); if(v) return {voice:v,lang:'ko',male:true};   // 한국어 남성
+  v=byHint(en,MALE_EN);     if(v) return {voice:v,lang:'en',male:true};   // 영어 남성
+  if(ko[0]) return {voice:ko[0],lang:'ko',male:false};                    // 한국어(여성 추정)→피치다운
+  return {voice:vs[0],lang:/^ko/i.test(vs[0].lang)?'ko':'en',male:false};
 }
-if(ttsOK){ loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
-function mkUtter(text, rate, pitch){
-  const u = new SpeechSynthesisUtterance(text);
-  if(koVoice){ u.voice=koVoice; u.lang='ko-KR'; } else { u.lang='en-US'; }
-  u.rate=rate; u.pitch=pitch; u.volume=1;
+function loadVoices(){ if(ttsOK) VOICE=selectVoice(); }
+if(ttsOK){ loadVoices(); speechSynthesis.onvoiceschanged=loadVoices; }
+function mkUtter(koText, enText, rate, pitch){
+  const u=new SpeechSynthesisUtterance();
+  if(VOICE&&VOICE.voice){ u.voice=VOICE.voice; u.lang=VOICE.voice.lang; u.text=(VOICE.lang==='ko')?koText:enText; }
+  else { u.lang='ko-KR'; u.text=koText; }
+  u.rate=rate;
+  // 확실한 남성 음성이 아니면(여성 추정) 피치를 크게 낮춰 남성에 가깝게
+  u.pitch = (VOICE&&VOICE.male) ? pitch : Math.max(0.3, pitch*0.6);
+  u.volume=1;
   return u;
 }
 function say(koText, enText, rate, pitch){
   if(!ttsOK) return;
-  try{ speechSynthesis.cancel(); speechSynthesis.speak(mkUtter(koVoice?koText:enText, rate, pitch)); }catch(e){}
+  try{ speechSynthesis.cancel(); speechSynthesis.speak(mkUtter(koText,enText,rate,pitch)); }catch(e){}
 }
 
 /* 콜 종류별 — 효과음 + 흥분된 음성 */
@@ -170,12 +184,12 @@ function _playCall(kind){
     noiseHit(t, 0.05, 2400, 7, 0.45);
     tone(t+0.01, 700, 1500, 0.13, 'square', 0.13);
     chordStab(t+0.02, [880,1320], 0.12, 'square', 0.07);
-    say('스트라이크!', 'Strike!', 1.08, 1.25);
+    say('스트라이크!', 'Strike!', 1.1, 0.9);     // 빠르게(에너지) + 남성 음역(낮은 피치)
   }
   else if(kind==='ball'){
     // 차분한 저음 — 볼은 담담하게
     tone(t, 320, 190, 0.16, 'sine', 0.16);
-    say('볼', 'Ball', 0.98, 0.95);
+    say('볼', 'Ball', 0.98, 0.82);
   }
   else if(kind==='out'){
     playStrikeout();
@@ -183,7 +197,7 @@ function _playCall(kind){
   else if(kind==='walk'){
     tone(t, 520, 360, 0.16, 'sine', 0.14);
     tone(t+0.12, 360, 300, 0.18, 'sine', 0.12);
-    say('볼넷', 'Ball four', 1.0, 1.0);
+    say('볼넷', 'Ball four', 1.0, 0.88);
   }
 }
 
@@ -204,8 +218,8 @@ function playStrikeout(){
   // 4) 음성 2단 폭발: "삼진" → (사이) → "아웃!"
   if(ttsOK){
     try{ speechSynthesis.cancel(); }catch(e){}
-    setTimeout(()=>{ try{ speechSynthesis.speak(mkUtter(koVoice?'삼진':'Strike three', 0.95, 0.95)); }catch(e){} }, 360);
-    setTimeout(()=>{ try{ speechSynthesis.speak(mkUtter(koVoice?'아웃!':"You're out!", 1.0, 1.3)); }catch(e){} }, 980);
+    setTimeout(()=>{ try{ speechSynthesis.speak(mkUtter('삼진','Strike three', 0.98, 0.82)); }catch(e){} }, 360);
+    setTimeout(()=>{ try{ speechSynthesis.speak(mkUtter('아웃!',"You're out", 1.02, 0.95)); }catch(e){} }, 980);
   }
 }
 
