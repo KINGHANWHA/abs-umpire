@@ -433,9 +433,9 @@ function setButtons(on){
    렌더링
    ========================================================= */
 function drawField(){
-  // 하늘/조명
+  // 하늘/조명 (크롬 인디고 톤으로 페이스플레이트와 조화)
   let g=ctx.createLinearGradient(0,0,0,SCENE.horizon);
-  g.addColorStop(0,'#0a1426'); g.addColorStop(1,'#16263f');
+  g.addColorStop(0,'#191d34'); g.addColorStop(1,'#33407e');
   ctx.fillStyle=g; ctx.fillRect(0,0,W,SCENE.horizon);
   // 외야 잔디
   g=ctx.createLinearGradient(0,SCENE.horizon,0,SCENE.plateY);

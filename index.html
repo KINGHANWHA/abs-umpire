@@ -20,7 +20,7 @@
 <meta name="twitter:image" content="og-image.png" />
 
 <!-- 업데이트할 때마다 ?v= 숫자를 올리면 브라우저가 새 파일을 받음(캐시 무력화) -->
-<link rel="stylesheet" href="style.css?v=4" />
+<link rel="stylesheet" href="style.css?v=5" />
 </head>
 <body>
 <div id="app">
@@ -96,7 +96,7 @@
 
   <!-- 시작 화면 -->
   <div id="start-screen" class="overlay">
-    <div class="panel">
+    <div class="panel" data-eyebrow="◉ ABS SYSTEM — KBO">
       <h1>당신이 곧 <span class="accent">ABS</span></h1>
       <p class="tagline">포수 뒤 심판 시점에서 스트라이크와 볼을 판정하라</p>
       <ul class="howto">
@@ -113,7 +113,7 @@
 
   <!-- 게임오버 -->
   <div id="over-screen" class="overlay hidden">
-    <div class="panel">
+    <div class="panel" data-eyebrow="◉ GAME OVER">
       <h1 class="over-title">판정 종료</h1>
       <div class="final-grid">
         <div><span class="fl">최종 점수</span><span id="final-score" class="fv">0</span></div>
@@ -128,7 +128,7 @@
 
   <!-- 규칙 패널 -->
   <div id="rules-screen" class="overlay hidden">
-    <div class="panel rules">
+    <div class="panel rules" data-eyebrow="◉ RULES — ABS">
       <h2>KBO ABS 판정 규칙</h2>
       <div class="rule-block">
         <h3>좌우 (홈플레이트)</h3>
@@ -151,6 +151,6 @@
   </div>
 </div>
 
-<script src="game.js?v=4"></script>
+<script src="game.js?v=5"></script>
 </body>
 </html>
